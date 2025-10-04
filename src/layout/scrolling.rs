@@ -4718,7 +4718,7 @@ impl<W: LayoutElement> Column<W> {
     fn toggle_width(&mut self, tile_idx: Option<usize>, forwards: bool) {
         let tile_idx = tile_idx.unwrap_or(self.active_tile_idx);
 
-        let preset_idx = if self.is_full_width {
+        let preset_idx = if self.is_full_width || self.is_pending_maximized {
             None
         } else {
             self.preset_width_idx
@@ -4767,12 +4767,19 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn toggle_full_width(&mut self) {
-        self.is_full_width = !self.is_full_width;
+        if self.is_pending_maximized {
+            // Treat it as unmaximize.
+            self.is_pending_maximized = false;
+            self.is_full_width = false;
+        } else {
+            self.is_full_width = !self.is_full_width;
+        }
+
         self.update_tile_sizes(true);
     }
 
     fn set_column_width(&mut self, change: SizeChange, tile_idx: Option<usize>, animate: bool) {
-        let current = if self.is_full_width {
+        let current = if self.is_full_width || self.is_pending_maximized {
             ColumnWidth::Proportion(1.)
         } else {
             self.width
@@ -4822,6 +4829,7 @@ impl<W: LayoutElement> Column<W> {
         self.width = width;
         self.preset_width_idx = None;
         self.is_full_width = false;
+        self.is_pending_maximized = false;
         self.update_tile_sizes(animate);
     }
 
@@ -4900,6 +4908,7 @@ impl<W: LayoutElement> Column<W> {
         }
 
         self.data[tile_idx].height = WindowHeight::Fixed(window_height.clamp(1., MAX_PX));
+        self.is_pending_maximized = false;
         self.update_tile_sizes(animate);
     }
 
@@ -4932,7 +4941,9 @@ impl<W: LayoutElement> Column<W> {
 
         let len = self.options.layout.preset_window_heights.len();
         let preset_idx = match self.data[tile_idx].height {
-            WindowHeight::Preset(idx) => (idx + if forwards { 1 } else { len - 1 }) % len,
+            WindowHeight::Preset(idx) if !self.is_pending_maximized => {
+                (idx + if forwards { 1 } else { len - 1 }) % len
+            }
             _ => {
                 let current = self.data[tile_idx].size.h;
                 let tile = &self.tiles[tile_idx];
@@ -4967,6 +4978,7 @@ impl<W: LayoutElement> Column<W> {
             }
         };
         self.data[tile_idx].height = WindowHeight::Preset(preset_idx);
+        self.is_pending_maximized = false;
         self.update_tile_sizes(true);
     }
 
