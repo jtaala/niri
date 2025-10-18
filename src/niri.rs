@@ -120,6 +120,8 @@ use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 #[cfg(feature = "dbus")]
 use crate::dbus::freedesktop_locale1::Locale1ToNiri;
 #[cfg(feature = "dbus")]
+use crate::dbus::freedesktop_login1::Login1ToNiri;
+#[cfg(feature = "dbus")]
 use crate::dbus::gnome_shell_introspect::{self, IntrospectToNiri, NiriToIntrospect};
 #[cfg(feature = "dbus")]
 use crate::dbus::gnome_shell_screenshot::{NiriToScreenshot, ScreenshotToNiri};
@@ -728,6 +730,18 @@ impl State {
         self.niri.clock.clear();
         self.niri.pointer_inactivity_timer_got_reset = false;
         self.niri.notified_activity_this_iteration = false;
+    }
+
+    // We monitor both libinput and logind: libinput is always there (including without DBus), but
+    // it misses some switch events (e.g. after unsuspend) on some systems.
+    pub fn set_lid_closed(&mut self, is_closed: bool) {
+        if self.niri.is_lid_closed == is_closed {
+            return;
+        }
+
+        debug!("laptop lid {}", if is_closed { "closed" } else { "opened" });
+        self.niri.is_lid_closed = is_closed;
+        self.backend.on_output_config_changed(&mut self.niri);
     }
 
     fn refresh(&mut self) {
@@ -1830,6 +1844,12 @@ impl State {
             return;
         }
 
+        // Redraw the pointer if hidden through cursor{} options
+        if self.niri.pointer_visibility == PointerVisibility::Hidden {
+            self.niri.pointer_visibility = PointerVisibility::Visible;
+            self.niri.queue_redraw_all();
+        }
+
         let default_output = self
             .niri
             .output_under_cursor()
@@ -2284,6 +2304,14 @@ impl State {
         if let Err(err) = to_introspect.send_blocking(msg) {
             warn!("error sending windows to introspect: {err:?}");
         }
+    }
+
+    #[cfg(feature = "dbus")]
+    pub fn on_login1_msg(&mut self, msg: Login1ToNiri) {
+        let Login1ToNiri::LidClosedChanged(is_closed) = msg;
+
+        trace!("login1 lid {}", if is_closed { "closed" } else { "opened" });
+        self.set_lid_closed(is_closed);
     }
 
     #[cfg(feature = "dbus")]
